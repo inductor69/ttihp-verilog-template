@@ -1,0 +1,17 @@
+(executable
+ (name main)
+ (modules main)
+ (libraries protocore hardcaml)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(executable
+ (name report_util)
+ (modules report_util)
+ (libraries protocore hardcaml)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(executable
+ (name gen_progs)
+ (modules gen_progs)
+ (libraries protocore)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))

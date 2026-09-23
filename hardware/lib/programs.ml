@@ -1,0 +1,214 @@
+(* Firmware programs for ProtoCore, written in the assembler and loaded via the
+   host SPI interface. Each program is cycle-exact: the assembler's
+   [delay_cycles] is used to hit bit timing precisely.
+
+   Pin conventions:
+     UART: TX = pin 0
+     SPI : CS = pin 0, CLK = pin 1, MOSI = pin 2, MISO = pin 3 (input)
+     I2C : SCL = pin 0, SDA = pin 1
+*)
+
+open Base
+open Isa
+open Asm
+
+let delay n = List.map (delay_cycles n) ~f:(fun d -> i d)
+
+(* UART 8N1 transmitter, LSB first.
+   [msg_addr]/[nbytes]: the message lives in data memory and is transmitted
+   forever. Data bit timing is exactly [bit_time] core cycles.
+   A software bit-reverse (using the carry flag, set by SHR) converts the byte
+   to LSB-first order, since OUTS shifts the MSB out. *)
+let uart_tx_program ~(msg_addr : int) ~(nbytes : int) ~(bit_time : int) : int array =
+  let tx = 0 in
+  let d_start = bit_time - 2 in
+  let d_data = bit_time - 2 in (* Outs + Delay + Decjnz = 2 + d_data cycles *)
+  let d_stop = bit_time - 5 in
+  let lines =
+    [ i (Ldi (OE, 0x01))
+    ; i (Ldi (PINS, 0x01))
+    ; i (Ldi (TMP, nbytes)) (* byte counter *)
+    ; i (Ldi (Y, msg_addr))
+    ; label "byte_loop" (Ldy SHIFT)
+    ; i (Ldi (X, 8)) (* reverse counter *)
+    ; i (Ldi (A, 0))
+    ; label "rev_loop" (Shl (A, 1)) (* A <<= 1 *)
+    ; i (Shr (SHIFT, 1)) (* carry = bit being reversed *)
+    ; i (Jnc (Label "rev_skip"))
+    ; i (Addi (A, 1)) (* bit = 1 *)
+    ; label "rev_skip" (Decjnz (Label "rev_loop"))
+    ; i (Mov (SHIFT, A)) (* SHIFT = bit-reversed char *)
+    ; i (Ldi (X, 8)) (* data bit counter *)
+    ; i (Setpin (tx, 0)) (* start bit *)
+    ]
+    @ delay d_start
+    @ [ label "bit_loop" (Outs tx) ]
+    @ delay d_data
+    @ [ i (Decjnz (Label "bit_loop"))
+      ; i (Setpin (tx, 1)) (* stop bit *)
+      ]
+    @ delay d_stop
+    @ [ i (Addi (Y, 1))
+      ; i (Subi (TMP, 1)) (* byte counter - 1, sets Z *)
+      ; i (Jnz (Label "byte_loop"))
+      ; i (Ldi (TMP, nbytes))
+      ; i (Ldi (Y, msg_addr))
+      ; i (Jmp (Label "byte_loop"))
+      ]
+  in
+  assemble ~program_size:256 lines
+
+(* SPI master (mode 0), MSB first. Sends [nbytes] from data memory starting at
+   [msg_addr]. Each bit: drive MOSI, raise CLK, lower CLK. *)
+let spi_master_program ~(msg_addr : int) ~(nbytes : int) ~(half : int) : int array =
+  let cs = 0 and clk = 1 and mosi = 2 in
+  let clk_mask = 1 lsl clk in
+  let lines =
+    [ i (Ldi (OE, 0x07)) (* cs, clk, mosi outputs; miso input *)
+    ; i (Ldi (PINS, 0x01)) (* idle: cs high, clk low, mosi low *)
+    ; i (Setpin (cs, 0)) (* assert CS *)
+    ; i (Ldi (TMP, nbytes)) (* byte counter *)
+    ; i (Ldi (Y, msg_addr))
+    ; label "byte_loop" (Ldy SHIFT)
+    ; i (Ldi (X, 8)) (* bit counter *)
+    ; label "bit_loop" (Outs mosi)
+    ; i (Xori (PINS, clk_mask)) (* CLK high *)
+    ]
+    @ delay half
+    @ [ i (Xori (PINS, clk_mask)) (* CLK low *)
+      ]
+    @ delay half
+    @ [ i (Decjnz (Label "bit_loop"))
+      ; i (Addi (Y, 1))
+      ; i (Subi (TMP, 1))
+      ; i (Jnz (Label "byte_loop"))
+      ; i (Setpin (cs, 1)) (* deassert CS *)
+      ; i (Ldi (TMP, nbytes))
+      ; i (Ldi (Y, msg_addr))
+      ; i (Setpin (cs, 0))
+      ; i (Jmp (Label "byte_loop"))
+      ]
+  in
+  assemble ~program_size:256 lines
+
+(* I2C master (push-pull demo), SCL=p0 SDA=p1. START, then [nbytes] bytes with
+   ACK sampling, then STOP. Repeats forever. *)
+let i2c_master_program ~(msg_addr : int) ~(nbytes : int) ~(half : int) : int array =
+  let scl = 0 and sda = 1 in
+  let lines =
+    [ i (Ldi (OE, 0x03)) (* both push-pull outputs *)
+    ; i (Ldi (PINS, 0x03)) (* idle high *)
+    ; i (Ldi (TMP, nbytes)) (* byte counter *)
+    ; i (Ldi (Y, msg_addr))
+    ; label "start" (Setpin (sda, 0)) (* SDA low while SCL high = START *)
+    ; i (Setpin (scl, 0)) (* SCL low *)
+    ; label "byte_loop" (Ldy SHIFT)
+    ; i (Ldi (X, 8)) (* bit counter *)
+    ; label "bit_loop" (Outs sda) (* SDA = SHIFT[7]; SHIFT<<=1 *)
+    ; i (Setpin (scl, 1)) (* SCL high *)
+    ]
+    @ delay half
+    @ [ i (Setpin (scl, 0)) (* SCL low *)
+      ]
+    @ delay half
+    @ [ i (Decjnz (Label "bit_loop"))
+      ; i (Setpin (sda, 1)) (* release SDA (input side) *)
+      ; i (Setpin (scl, 1)) (* 9th clock, ACK window *)
+      ]
+    @ delay half
+    @ [ i (In (A, sda)) (* sample ACK *)
+      ; i (Setpin (scl, 0))
+      ]
+    @ delay half
+    @ [ i (Setpin (scl, 1)) (* STOP: SCL high, then SDA rising *)
+      ]
+    @ delay half
+    @ [ i (Setpin (sda, 1))
+      ; i (Setpin (scl, 0))
+      ; i (Addi (Y, 1))
+      ; i (Subi (TMP, 1))
+      ; i (Jnz (Label "byte_loop"))
+      ; i (Ldi (TMP, nbytes))
+      ; i (Ldi (Y, msg_addr))
+      ; i (Jmp (Label "start"))
+      ]
+  in
+  assemble ~program_size:256 lines
+
+(* Toggle pin 0: high for [d]+1 cycles, low for [d]+1 cycles. Used to verify
+   DELAY timing is cycle-exact. *)
+let blink_program ~(d : int) : int array =
+  let lines =
+    [ i (Ldi (OE, 0x01))
+    ; i (Ldi (PINS, 0x00))
+    ; label "loop" (Setpin (0, 1))
+    ]
+    @ delay d
+    @ [ i (Setpin (0, 0)) ]
+    @ delay d
+    @ [ i (Jmp (Label "loop")) ]
+  in
+  assemble ~program_size:256 lines
+
+(* UART 8N1 receiver, LSB first. RX = pin 0 (input).
+   Waits for a falling edge (start bit), samples each data bit at its midpoint
+   using [Ins] (which accumulates LSB-first), stores the byte at the buffer
+   addressed by Y, pushes it to the host FIFO, then skips the stop bit. *)
+let uart_rx_program ~(buffer_addr : int) ~(bit_time : int) : int array =
+  let rx = 0 in
+  (* Initial wait: 1.5 bit times to the middle of data bit 0. *)
+  let initial_delay = bit_time + (bit_time / 2) in
+  let d_data = bit_time - 2 in (* Ins + Delay + Decjnz = 2 + d_data cycles *)
+  let lines =
+    [ i (Ldi (OE, 0x00)) (* all inputs *)
+    ; i (Ldi (Y, buffer_addr))
+    ; label "wait_high" (Jnb (rx, Label "wait_high")) (* until pin high *)
+    ; label "wait_low" (Jb (rx, Label "wait_low")) (* until start (falling edge) *)
+    ]
+    @ delay initial_delay
+    @ [ i (Ldi (X, 8))
+      ; label "bit_loop" (Ins rx)
+      ]
+    @ delay d_data
+    @ [ i (Decjnz (Label "bit_loop"))
+      ; i (Ldi (A, 0)) (* bit-reverse: Ins left-shifts, so first sample is MSB *)
+      ; i (Ldi (X, 8))
+      ; label "rev_loop" (Shl (A, 1))
+      ; i (Shr (SHIFT, 1)) (* carry = LSB of SHIFT *)
+      ; i (Jnc (Label "rev_skip"))
+      ; i (Addi (A, 1))
+      ; label "rev_skip" (Decjnz (Label "rev_loop"))
+      ; i (Mov (SHIFT, A))
+      ; i (Sty SHIFT) (* data[Y] = byte *)
+      ; i (Addi (Y, 1))
+      ; i (Mov (A, SHIFT))
+      ; i (Push)
+      ]
+    @ delay bit_time (* skip the stop bit *)
+    @ [ i (Jmp (Label "wait_high"))
+      ]
+  in
+  assemble ~program_size:256 lines
+
+(* A tiny program exercising the arithmetic/branch/flags unit for unit tests. *)
+let arithmetic_program () : int array =
+  let lines =
+    [ i (Ldi (A, 5))
+    ; i (Addi (A, 3)) (* 8 *)
+    ; i (Subi (A, 2)) (* 6 *)
+    ; i (Shl (A, 2)) (* 24 *)
+    ; i (Shr (A, 3)) (* 3 *)
+    ; i (St (A, 0)) (* data[0] = 3 *)
+    ; i (Ldi (A, 0xff))
+    ; i (Andi (A, 0x0f)) (* 15 *)
+    ; i (Ori (A, 0x10)) (* 31 *)
+    ; i (Xori (A, 0xff)) (* 0xe0 *)
+    ; i (St (A, 1)) (* data[1] = 0xe0 *)
+    ; i (Ldi (X, 4))
+    ; label "l1" (Addi (A, 1))
+    ; i (Decjnz (Label "l1")) (* A += 4 -> 0xe4 *)
+    ; i (St (A, 2))
+    ; i (Jmp (Addr 15))
+    ]
+  in
+  assemble ~program_size:256 lines

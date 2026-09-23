@@ -32,6 +32,12 @@ endif
 # Allow sharing configuration between design and testbench via `include`:
 COMPILE_ARGS 		+= -I$(SRC_DIR)
 
+# Verilator needs --timing to honour the #1 delay in tb.v
+ifeq ($(SIM),verilator)
+COMPILE_ARGS 		+= --timing
+COMPILE_ARGS 		+= -Wno-COMBDLY
+endif
+
 # Include the testbench sources:
 VERILOG_SOURCES += $(PWD)/tb.v
 TOPLEVEL = tb

@@ -1,0 +1,67 @@
+(library
+ (name test_util)
+ (modules test_util)
+ (libraries protocore hardcaml)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_asm)
+ (modules test_asm)
+ (libraries protocore test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_capture)
+ (modules test_capture)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_pattern)
+ (modules test_pattern)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_core)
+ (modules test_core)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_uart_tx)
+ (modules test_uart_tx)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_uart_rx)
+ (modules test_uart_rx)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_spi)
+ (modules test_spi)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_random)
+ (modules test_random)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_i2c)
+ (modules test_i2c)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+
+
+(test
+ (name test_debug)
+ (modules test_debug)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
