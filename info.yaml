@@ -1,9 +1,9 @@
 # Tiny Tapeout project information
 project:
   title:        "ProtoCore - programmable protocol emulator"
-  author:       "ProtoCore Team"
+  author:       "inductor69"
   discord:      ""
-  description:  "A tiny cycle-counted CPU for emulating UART/SPI/I2C and other serial protocols in firmware. This milestone: Hardcaml-generated UART transmitter on uo[0]."
+  description:  "A cycle-counted, firmware-programmable protocol engine with UART, SPI and I2C examples, edge capture and autonomous waveform generation."
   language:     "Verilog" # generated from OCaml/Hardcaml; see hardware/
   clock_hz:     50000000  # Clock frequency in Hz
 
@@ -11,25 +11,23 @@ project:
   tiles: "6x4"
 
   # Your top module name must start with "tt_um_". Make it unique by including your github username:
-  top_module:  "tt_um_protocore"
+  top_module:  "tt_um_inductor69_protocore"
 
   # List your project's source files here.
   # Source files must be in ./src and you must list each source file separately, one per line.
   # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
   source_files:
     - "project.v"
-    - "sram/RM_IHPSG13_1P_256x16_c2_bm_bist.v"
-    - "sram/RM_IHPSG13_1P_core_behavioral_bm_bist.v"
-    - "sram/RM_IHPSG13_2P_256x8_c2_bm_bist.v"
-    - "sram/RM_IHPSG13_2P_core_behavioral_bm_bist_ideal.v"
+    - "sram/RM_IHPSG13_1P_256x16_c2_bm_bist_blackbox.v"
+    - "sram/RM_IHPSG13_2P_256x8_c2_bm_bist_blackbox.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
+  ui[0]: "Host SPI CSn"
+  ui[1]: "Host SPI SCK"
+  ui[2]: "Host SPI MOSI"
   ui[3]: ""
   ui[4]: ""
   ui[5]: ""
@@ -37,24 +35,24 @@ pinout:
   ui[7]: ""
 
   # Outputs
-  uo[0]: "UART TX"
-  uo[1]: "UART busy"
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
+  uo[0]: "Host SPI MISO"
+  uo[1]: "Core running"
+  uo[2]: "Pattern output 2"
+  uo[3]: "Pattern output 3"
+  uo[4]: "Pattern output 4"
+  uo[5]: "Pattern output 5"
+  uo[6]: "Pattern output 6"
+  uo[7]: "Pattern output 7"
 
   # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  uio[0]: "Programmable protocol GPIO 0"
+  uio[1]: "Programmable protocol GPIO 1"
+  uio[2]: "Programmable protocol GPIO 2"
+  uio[3]: "Programmable protocol GPIO 3"
+  uio[4]: "Programmable protocol GPIO 4"
+  uio[5]: "Programmable protocol GPIO 5"
+  uio[6]: "Programmable protocol GPIO 6"
+  uio[7]: "Programmable protocol GPIO 7"
 
 # Do not change!
 yaml_version: 6

@@ -75,10 +75,11 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
   let ld_stall = Always.Variable.reg spec ~width:1 in (* synchronous data read: LD takes 2 cycles *)
   let ld_addr = Always.Variable.reg spec ~width:8 in
   let prog_addr_w = Signal.wire 8 in (* SRAM read address, driven after fetch_addr *)
+  let prog_ren_w = Signal.wire 1 in
   let sram_dout =
     if sram then
       Sram.sram_1p_256x16 ~clock:i.clock ~addr:prog_addr_w ~din:i.prog_wr_data
-        ~wen:i.prog_wr ~ren:(~:(i.prog_wr))
+        ~wen:i.prog_wr ~ren:prog_ren_w
     else
       Signal.gnd
   in
@@ -109,7 +110,9 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
   in
   let fetch_addr = mux2 branch_taken imm pc.value -- "fetch_addr" in
   let () =
-    if sram then Signal.assign prog_addr_w (mux2 i.prog_wr i.prog_wr_addr fetch_addr)
+    if sram then begin
+      Signal.assign prog_addr_w (mux2 i.prog_wr i.prog_wr_addr fetch_addr)
+    end
   in
   (* Program memory: flop memory + IR register (sim) or the IHP SRAM macro
      whose registered output is the instruction (synthesis). *)
@@ -139,6 +142,13 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
                (mux2 (op_is 0x1D) (~:(i.fifo_rx_empty))
                   (mux2 ld_active ld_stall.value vdd)))))
     -- "advance"
+  in
+  let () =
+    if sram then
+      (* The macro output itself is the instruction register.  Disable its
+         read port while a variable-latency instruction stalls so the current
+         opcode cannot be replaced by the following instruction. *)
+      Signal.assign prog_ren_w ((~:(i.prog_wr)) &: (advance |: ~:(i.enable)))
   in
   let ir_next = if sram then sram_dout else mux2 advance prog_mem ir.value in
   (* Register file read muxes *)
@@ -212,10 +222,11 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
     |: op_is 0x0A (* ldy *) |: op_is 0x18 (* in *) |: op_is 0x19 (* pinin *)
     |: op_is 0x1D (* pull *)
   in
+  let load_value = if sram then sram_din else data_read.value in
   let write_value =
     mux2 (op_is 0x01) imm
       (mux2 (op_is 0x02) reg_of_src
-         (mux2 (op_is 0x1E |: op_is 0x0A) data_read.value
+         (mux2 (op_is 0x1E |: op_is 0x0A) load_value
             (mux2 (op_is 0x18) (zero 7 @: pin_imm_bit)
                (mux2 (op_is 0x19) i.pins_in
                   (mux2 (op_is 0x1D) i.fifo_rx_data alu_result)))))

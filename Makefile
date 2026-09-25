@@ -9,7 +9,7 @@
 
 VENV ?= .venv
 
-.PHONY: rtl sim cocotb cocotb-setup all clean
+.PHONY: rtl sim formal cocotb cocotb-setup all clean
 
 # Regenerate src/project.v from the Hardcaml source
 rtl:
@@ -19,11 +19,15 @@ rtl:
 # much smaller than the flip-flop arrays Yosys synthesizes here)
 area:
 	cd hardware && opam exec -- dune exec bin/report_util.exe
-	cd src && yosys -p "read_verilog project.v; synth -top tt_um_protocore; stat" 2>/dev/null | sed -n '/Printing statistics/,$$p' | grep -E "cells|_DFF|_SDFF|_MUX|_NAND|_AND |_AND_|_OR |_OR_|_XOR|_NOT"
+	cd src && yosys -p "read_verilog -lib sram/RM_IHPSG13_1P_256x16_c2_bm_bist.v sram/RM_IHPSG13_2P_256x8_c2_bm_bist.v; read_verilog project.v; synth -top tt_um_inductor69_protocore; stat" 2>/dev/null | sed -n '/Printing statistics/,$$p' | grep -E "cells|RM_IHP|_DFF|_SDFF|_MUX|_NAND|_AND |_AND_|_OR |_OR_|_XOR|_NOT"
 
 # Run the OCaml cycle-accurate tests (Hardcaml Cyclesim)
 sim:
 	cd hardware && opam exec -- dune runtest --force
+
+formal:
+	cd hardware && opam exec -- dune exec bin/formal_fifo.exe
+	cd formal && sby -f fifo.sby
 
 # Set up the cocotb Python environment
 cocotb-setup:

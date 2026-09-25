@@ -9,7 +9,7 @@ let output_file = "../src/project.v"
 
 let () =
   let module C = Circuit.With_interface (Top.I) (Top.O) in
-  let circuit = C.create_exn ~name:"tt_um_protocore" (Top.create ~sram:true) in
+  let circuit = C.create_exn ~name:"tt_um_inductor69_protocore" (Top.create ~sram:true) in
   Rtl.output
     ~output_mode:(Rtl.Output_mode.To_file output_file)
     Rtl.Language.Verilog circuit;

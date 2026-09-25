@@ -91,6 +91,47 @@ let spi_master_program ~(msg_addr : int) ~(nbytes : int) ~(half : int) : int arr
   in
   assemble ~program_size:256 lines
 
+(* SPI mode-0 full-duplex master. Each transmitted byte is replaced in-place
+   by the simultaneously received MISO byte. The two branch paths used to
+   accumulate MISO are cycle-balanced. *)
+let spi_master_full_duplex_program
+    ~(buffer_addr : int)
+    ~(nbytes : int)
+    ~(half : int) : int array =
+  let cs = 0 and clk = 1 and mosi = 2 and miso = 3 in
+  let lines =
+    [ i (Ldi (OE, 0x07))
+    ; i (Ldi (PINS, 0x01))
+    ; i (Setpin (cs, 0))
+    ; i (Ldi (TMP, nbytes))
+    ; i (Ldi (Y, buffer_addr))
+    ; label "byte_loop" (Ldy SHIFT)
+    ; i (Ldi (A, 0))
+    ; i (Ldi (X, 8))
+    ; label "bit_loop" (Outs mosi)
+    ; i (Setpin (clk, 1))
+    ]
+    @ delay half
+    @ [ i (Shl (A, 1))
+      ; i (Jb (miso, Label "miso_one"))
+      ; i Nop
+      ; i (Jmp (Label "miso_done"))
+      ; label "miso_one" (Addi (A, 1))
+      ; i Nop
+      ; label "miso_done" (Setpin (clk, 0))
+      ]
+    @ delay half
+    @ [ i (Decjnz (Label "bit_loop"))
+      ; i (Sty A)
+      ; i (Addi (Y, 1))
+      ; i (Subi (TMP, 1))
+      ; i (Jnz (Label "byte_loop"))
+      ; i (Setpin (cs, 1))
+      ; label "halt" (Jmp (Label "halt"))
+      ]
+  in
+  assemble ~program_size:256 lines
+
 (* I2C master (push-pull demo), SCL=p0 SDA=p1. START, then [nbytes] bytes with
    ACK sampling, then STOP. Repeats forever. *)
 let i2c_master_program ~(msg_addr : int) ~(nbytes : int) ~(half : int) : int array =
@@ -131,6 +172,70 @@ let i2c_master_program ~(msg_addr : int) ~(nbytes : int) ~(half : int) : int arr
       ; i (Ldi (TMP, nbytes))
       ; i (Ldi (Y, msg_addr))
       ; i (Jmp (Label "start"))
+      ]
+  in
+  assemble ~program_size:256 lines
+
+(* Open-drain I2C master. PINS stays zero and OE acts as the open-drain drive:
+   OE=1 pulls a line low, OE=0 releases it to an external pull-up. The master
+   waits for sampled SCL high after every release, supporting slave clock
+   stretching. ACK is sampled into A after each byte. *)
+let i2c_master_open_drain_program
+    ~(msg_addr : int)
+    ~(nbytes : int)
+    ~(half : int) : int array =
+  let scl = 0 and sda = 1 in
+  let lines =
+    [ i (Ldi (PINS, 0x00))
+    ; i (Ldi (OE, 0x00)) (* bus released/idle *)
+    ; i (Ldi (TMP, nbytes))
+    ; i (Ldi (Y, msg_addr))
+    ; i (Waitpin (scl, 1))
+    ; label "start" (Ldi (OE, 0x02)) (* pull SDA low while SCL high *)
+    ]
+    @ delay half
+    @ [ i (Ldi (OE, 0x03)) (* pull both low *)
+      ; label "byte_loop" (Ldy SHIFT)
+      ; i (Ldi (X, 8))
+      ; label "bit_loop" (Shl (SHIFT, 1))
+      ; i (Jc (Label "send_one"))
+      ; i (Ldi (OE, 0x03)) (* zero: SCL and SDA low *)
+      ; i (Jmp (Label "data_set"))
+      ; label "send_one" (Ldi (OE, 0x01)) (* one: SDA released, SCL low *)
+      ; i Nop
+      ]
+    @ delay half
+    @ [ label "data_set" (Jc (Label "clock_high_one"))
+      ; i (Ldi (OE, 0x02)) (* zero: SDA low, SCL released *)
+      ; i (Jmp (Label "clock_released"))
+      ; label "clock_high_one" (Ldi (OE, 0x00)) (* both released *)
+      ; i Nop
+      ; label "clock_released" (Waitpin (scl, 1)) (* clock stretching *)
+      ]
+    @ delay half
+    @ [ i (Ldi (OE, 0x01)) (* SCL low, SDA released temporarily *)
+      ; i (Decjnz (Label "bit_loop"))
+      ; i (Ldi (OE, 0x01)) (* release SDA for ACK *)
+      ]
+    @ delay half
+    @ [ i (Ldi (OE, 0x00)) (* release SCL *)
+      ; i (Waitpin (scl, 1))
+      ]
+    @ delay half
+    @ [ i (In (A, sda)) (* 0 = ACK, 1 = NACK *)
+      ; i (Ldi (OE, 0x01)) (* pull SCL low *)
+      ; i (Addi (Y, 1))
+      ; i (Subi (TMP, 1))
+      ; i (Jnz (Label "byte_loop"))
+      ; i (Ldi (OE, 0x03)) (* prepare STOP with both low *)
+      ]
+    @ delay half
+    @ [ i (Ldi (OE, 0x02)) (* release SCL, keep SDA low *)
+      ; i (Waitpin (scl, 1))
+      ]
+    @ delay half
+    @ [ i (Ldi (OE, 0x00)) (* release SDA while SCL high = STOP *)
+      ; label "halt" (Jmp (Label "halt"))
       ]
   in
   assemble ~program_size:256 lines

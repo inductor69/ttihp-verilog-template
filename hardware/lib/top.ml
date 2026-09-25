@@ -44,7 +44,10 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
       ; test_enable = gnd
       }
   in
+  let ena_mask = repeat i.ena 8 in
   { O.uo_out = select proto.pat_pins 7 2 @: proto.running @: proto.miso
   ; uio_out = proto.pins_out
-  ; uio_oe = proto.oe
+  (* Never drive the shared Tiny Tapeout bidirectional bus while this design
+     is deselected. Internal state is retained and resumes when re-enabled. *)
+  ; uio_oe = proto.oe &: ena_mask
   }

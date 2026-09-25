@@ -87,7 +87,9 @@ let sram_2p_256x8
         ; "B_BIST_DIN", zero 8
         ; "B_BIST_BM", ones 8
         ]
-      ~outputs:[ "B_DOUT", 8 ]
+      (* Port A's read output is unused, but declaring it keeps generated
+         instances complete for strict RTL linters and simulators. *)
+      ~outputs:[ "A_DOUT", 8; "B_DOUT", 8 ]
       ()
   in
   Map.find_exn outputs "B_DOUT"

@@ -1,95 +1,70 @@
-# Synthesis findings (IHP 130nm via Tiny Tapeout)
+# Synthesis and physical-design results
 
-## Flow (validated up to synthesis)
+The SRAM-backed ProtoCore completes the IHP SG13G2 LibreLane flow in its 6x4
+Tiny Tapeout allocation. The recorded run is `final-precheck-20260925`, using
+a 20 ns clock constraint and the IHP program/data SRAM macros.
 
-- `tt-support-tools` + `librelane==3.0.3` + `PDK=ihp-sg13g2` in a Docker
-  (LibreLane container, 5.6 GB image) on macOS/OrbStack.
-- `./tt/tt_tool.py --create-user-config --ihp` and `--harden --ihp` work.
-  Python 3.12/3.13 required (3.14 breaks `yamlcore`).
-- `user_config.json` confirmed the 6x4 tile (`DIE_AREA 0 0 1289.28 710.64`,
-  `tt_block_6x4_pgvdd.def`).
+## Final routed result
 
-## Yosys technology-independent synthesis (local, `make area`)
+- Die: 1289.28 x 710.64 µm (6x4 tiles)
+- Logic before physical optimization: 4,328 cells, 62,011 µm²
+- SRAM macros: 66,275 µm² total
+- Final standard cells: 5,730, including CTS and timing-repair buffers
+- Final standard-cell area: 81,352 µm²
+- Standard-cell utilization: 9.73%; macros plus standard cells: 16.36%
+- Detailed-routing DRC: 0 violations
+- Antenna: 0 violations after five antenna diodes
+- LVS: circuits match uniquely; 0 device, net, property, or pin errors
+- Electrical design rules: 0 maximum-slew and 0 maximum-capacitance violations
+- Power integrity: VPWR and VGND fully connected; worst reported IR drop 0.05%
 
-| Version | Cells | Registers | Notes |
-|---------|-------|-----------|-------|
-| Original (2W4R data mem) | 36,657 | 6529 | 6144 = memories as flip-flops |
-| After 1R1W rework | 22,405 | ~595 + 6144 mem flops | read-port muxes removed |
+## Post-route timing at 50 MHz
 
-Logic (non-memory) ~ 16k cells / ~25-40k gate-equivalents. Registers ~600
-(excluding the 6,144 memory flops).
+All configured corners have zero setup and hold violations:
 
-## LibreLane P&R run (after the synchronous-fetch fix)
+| Corner | Worst setup slack | Worst hold slack |
+|---|---:|---:|
+| fast 1.32 V / -40 C | 11.561 ns | 0.091 ns |
+| typical 1.20 V / 25 C | 11.361 ns | 0.298 ns |
+| slow 1.08 V / 125 C | 6.119 ns | 0.603 ns |
 
-The **synchronous program fetch** (instruction register + `fetch_addr` pipeline)
-preserves the exact 1-cycle ISA timing model (all 11 tests pass) and lets the
-flow complete:
+The IHP SRAM library names its fast model at -55 C; LibreLane maps that model
+to the PDK's `nom_fast_1p32V_m40C` analysis corner.
 
-- Full LibreLane flow runs: synthesis -> floorplan -> placement -> CTS ->
-  detailed routing -> GDS stream-out (64 MB GDS produced).
-- **Standard-cell utilization: 84.6%** (routing DRC clean: 0 violations).
-  This confirms the flip-flop memories nearly fill the tile.
-- **Timing (50 MHz / 20 ns):**
-  - nominal 1.20V/25C: setup WNS **0 ns** (closes), hold 0 ns
-  - fast 1.32V/-40C: setup -3.17 ns, hold -0.06 ns (fails)
-  - slow 1.08V/125C: setup -28.96 ns (fails; the long async data-memory read
-    path dominates)
+## DRC qualification note
 
-**Conclusion (unchanged):** the SRAM-macro integration is required (84.6% util
-is not manufacturable) and sufficient (~29% util); it should also fix the
-slow-corner timing by removing the async 256:1 read muxes.
+OpenROAD's detailed router closes at zero violations. The full official IHP
+KLayout deck at the Tiny Tapeout precheck PDK revision
+`22f43352dd8219f9007eb659e422e0d5fe28c5fb` also reports zero markers. Magic
+full-GDS DRC remains disabled in `src/config.json`: unlike the official deck,
+it expands and rechecks qualified SRAM internals without the SRAM-specific
+exemptions and therefore produces false macro-internal markers.
 
-## Area numbers (IHP sg13g2, via local Yosys ABC against the PDK liberty)
+## Memory integration
 
-`make area` runs a generic Yosys synthesis; the numbers below are from
-`yosys synth + abc -liberty sg13g2_stdcell + stat -liberty`.
+Program memory uses `RM_IHPSG13_1P_256x16_c2_bm_bist`; data memory uses
+`RM_IHPSG13_2P_256x8_c2_bm_bist`. Synthesis reads small black-box declarations,
+simulation reads the IHP behavioral models, and physical implementation binds
+the macro LEF/GDS plus fast, typical, and slow Liberty views. The macros are
+fixed at (67.3, 60) and (340, 60) µm and connect their Metal4 supplies to the
+TopMetal1 grid. The custom PDN adds one boundary-reaching VGND stripe over the
+1P SRAM access strap so the generated abstract LEF also passes Tiny Tapeout's
+power-pin accessibility check.
 
-| Configuration | Cells | Area (µm²) | % of 6x4 tile (0.7 mm²) |
-|---------------|-------|-----------|--------------------------|
-| Memories as flip-flops (current RTL) | 14,301 (post-ABC) | **553,949** | **~79% (won't route comfortably)** |
-| With IHP SRAM macros (est.) | ~8k + 2 macros | **~204,000** | **~29% (fits)** |
+`make area` provides a quick technology-independent check and currently reports
+3,121 generic logic cells plus the two black-box SRAM instances. The complete
+physical flow is the authoritative area and timing result.
 
-Breakdown (flop-memory version):
-- Combinational logic: 106,085 µm² (mux-heavy datapath/ALU)
-- 6,144 memory flip-flops: ~323,000 µm² (`sg13g2_dfrbp_1` ≈ 52.6 µm² each)
-- ~600 architectural registers: ~31,000 µm²
+## Reproduction
 
-With SRAM macros: program 256x16 = 236.8 x 118.78 µm (28,127 µm²) + data
-256x8 = 278.5 x 137.0 µm (38,148 µm²) = 66,275 µm² total, replacing ~323,000
-µm² of flip-flops.
+Generate Tiny Tapeout's merged configuration, then run LibreLane against the
+IHP PDK:
 
-**Conclusion:** integrating the SRAM macros is *required* (flop memories are
-79% of the tile) and *sufficient* (~29% utilization).
+```sh
+python tt/tt_tool.py --create-user-config --ihp
+python -m librelane --docker-no-tty --dockerized \
+  --pdk ihp-sg13g2 src/config_merged.json
+```
 
-## The blocking issue (why the LibreLane ABC run stalls)
-
-Both memories (256x16 program, 256x8 data) are **synthesized as flip-flop
-arrays** (6,144 DFFs) rather than SRAM macros, and the **asynchronous read
-port (256:1 mux)** creates a large combinational cloud. Yosys' ABC pass
-mapping to the IHP `sg13g2` cell library ran >20 min without completing at
-22k cells; the generic (non-PDK) synthesis completes in ~3 s.
-
-Root cause: LibreLane does not automatically infer the IHP SRAM macros from a
-generic `always @(posedge) ... mem[addr]` pattern.
-
-## Available SRAM macros (exact fits)
-
-The IHP PDK ships an `sg13g2_sram` library including:
-- `RM_IHPSG13_1P_256x16_c2_bm_bist` — single-port 256x16 (program memory)
-- `RM_IHPSG13_2P_256x8_c2_bm_bist` — two-port (1W/1R) 256x8 (data memory)
-
-Both match the design's dimensions exactly.
-
-## Recommended fix (next step)
-
-1. Instantiate the two SRAM macros as Hardcaml blackboxes (tie off the
-   `A_BIST_*` ports; 1P macro needs a write/read enable mux since the program
-   is loaded before the core runs).
-2. Make the memories **synchronous-read** and pipeline the core fetch:
-   add an instruction register (ir) so decode reads `ir` instead of the
-   async memory output. This adds a 1-cycle fetch latency / branch handling.
-3. Re-run `--harden`; expect the flop count to drop ~6k and ABC to complete.
-
-Fallback if a full rework is not feasible: shrink program memory to
-128x16 (7-bit PC) and data to 128x8 to reduce the flop array; the SRAM macro
-path remains the correct long-term answer.
+The final flow views include GDS, LEF, DEF, ODB, gate-level and powered
+netlists, SDC, SPICE, metrics, and a rendered layout PNG.

@@ -47,14 +47,32 @@
  (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
 
 (test
+ (name test_spi_full_duplex)
+ (modules test_spi_full_duplex)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
  (name test_random)
  (modules test_random)
  (libraries protocore hardcaml test_util)
  (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
 
 (test
+ (name test_fifo)
+ (modules test_fifo)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
  (name test_i2c)
  (modules test_i2c)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_i2c_open_drain)
+ (modules test_i2c_open_drain)
  (libraries protocore hardcaml test_util)
  (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
 

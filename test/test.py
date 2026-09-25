@@ -48,6 +48,18 @@ async def send_byte(dut, byte):
         await sck_cycle(dut, (byte >> bit) & 1)
 
 
+async def read_response_byte(dut):
+    """Read the byte presented immediately after an output command."""
+    value = int(dut.uo_out.value[0])
+    for _ in range(7):
+        await drive(dut, cs=1, sck=0, mosi=0)
+        await ClockCycles(dut.clk, SCK_HALF)
+        await drive(dut, cs=1, sck=1, mosi=0)
+        await ClockCycles(dut.clk, SCK_HALF)
+        value = (value << 1) | int(dut.uo_out.value[0])
+    return value
+
+
 async def deassert(dut):
     await drive(dut, cs=0, sck=0, mosi=0)
     await ClockCycles(dut.clk, 2)
@@ -82,6 +94,14 @@ async def load_data(dut, addr, bytes_):
     await data_addr(dut, addr)
     for b in bytes_:
         await data_write(dut, b)
+
+
+async def data_read(dut, addr):
+    await data_addr(dut, addr)
+    await send_byte(dut, 0x05)
+    value = await read_response_byte(dut)
+    await deassert(dut)
+    return value
 
 
 async def set_run(dut, run):
@@ -137,13 +157,36 @@ async def test_project(dut):
     message = read_hex("message.hex")
     await load_program(dut, words)
     await load_data(dut, 0x10, message)
+    readback = [await data_read(dut, 0x10 + i) for i in range(len(message))]
+    assert readback == message, "SRAM data-memory host readback mismatch"
+    # Start sampling before RUN is sent: the firmware can assert the UART
+    # start bit only a few clocks after it is enabled.
+    n = len(message) * 10 * BIT_TIME + 2500
+    sample_task = cocotb.start_soon(sample_tx(dut, n))
     await set_run(dut, run=1)
     dut._log.info(f"Loaded {len(words)} instructions, {len(message)} message bytes")
 
+    # Sanity-check the actual SRAM-backed top-level before spending millions
+    # of cycles decoding UART. Firmware starts by enabling and idling TX high.
+    await ClockCycles(dut.clk, 32)
+    assert int(dut.uio_oe.value[0]) == 1, "firmware did not enable UART TX"
+    assert int(dut.uio_out.value[0]) == 1, "firmware did not drive UART idle high"
+
+    # Tiny Tapeout projects share the bidirectional bus. Deselecting this
+    # project must immediately release every output without destroying state.
+    dut.ena.value = 0
+    await RisingEdge(dut.clk)
+    assert int(dut.uio_oe.value) == 0, "uio outputs driven while ena is low"
+    dut.ena.value = 1
+    await RisingEdge(dut.clk)
+
     # Sample and decode the UART output
     dut._log.info("Sampling UART TX")
-    n = len(message) * 10 * BIT_TIME + 2000
-    samples = await sample_tx(dut, n)
+    samples = await sample_task
+    transitions = sum(a != b for a, b in zip(samples, samples[1:]))
+    dut._log.info(
+        f"UART samples: low={samples.count(0)} high={samples.count(1)} transitions={transitions}"
+    )
 
     got = []
     pos = 0

@@ -6,12 +6,17 @@ SIM ?= icarus
 FST ?= -fst # Use more efficient FST format
 TOPLEVEL_LANG ?= verilog
 SRC_DIR = $(PWD)/../src
-PROJECT_SOURCES = project.v
+PROJECT_SOURCES = project.v \
+	sram/RM_IHPSG13_1P_256x16_c2_bm_bist.v \
+	sram/RM_IHPSG13_1P_core_behavioral_bm_bist.v \
+	sram/RM_IHPSG13_2P_256x8_c2_bm_bist.v \
+	sram/RM_IHPSG13_2P_core_behavioral_bm_bist_ideal.v
 
 ifneq ($(GATES),yes)
 
 # RTL simulation:
 SIM_BUILD				= sim_build/rtl
+COMPILE_ARGS    += -DFUNCTIONAL
 VERILOG_SOURCES += $(addprefix $(SRC_DIR)/,$(PROJECT_SOURCES))
 
 else
@@ -36,6 +41,9 @@ COMPILE_ARGS 		+= -I$(SRC_DIR)
 ifeq ($(SIM),verilator)
 COMPILE_ARGS 		+= --timing
 COMPILE_ARGS 		+= -Wno-COMBDLY
+# The imported IHP behavioural model uses a deliberately over-wide default
+# parameter; it is harmless after specialization to the 8-bit macro.
+COMPILE_ARGS 		+= -Wno-WIDTHTRUNC
 endif
 
 # Include the testbench sources:

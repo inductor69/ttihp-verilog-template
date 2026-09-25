@@ -6,6 +6,6 @@ open Protocore
 
 let () =
   let module C = Circuit.With_interface (Top.I) (Top.O) in
-  let circuit = C.create_exn ~name:"tt_um_protocore" Top.create in
+  let circuit = C.create_exn ~name:"tt_um_inductor69_protocore" Top.create in
   let util = Circuit_utilization.create circuit in
   Stdio.print_s ([%sexp_of: Circuit_utilization.t] util)

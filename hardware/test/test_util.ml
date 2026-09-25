@@ -112,6 +112,17 @@ let ctrl t ~run =
   send_byte t ~cs:1 (if run then 1 else 0);
   deassert t
 
+let fifo_push t byte =
+  send_byte t ~cs:1 0x08;
+  send_byte t ~cs:1 byte;
+  deassert t
+
+let fifo_pop t =
+  send_byte t ~cs:1 0x09;
+  let v = read_byte t ~cs:1 in
+  deassert t;
+  v
+
 let load_program t (image : int array) =
   prog_addr t 0;
   Array.iter image ~f:(prog_data t)
