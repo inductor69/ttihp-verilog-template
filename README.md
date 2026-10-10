@@ -18,6 +18,8 @@ after fabrication through a dedicated SPI host port.
 - UART 8N1 transmitter and receiver firmware
 - SPI mode-0 transmit-only and full-duplex master firmware
 - Open-drain I2C master firmware with ACK sampling and clock-stretch support
+- JTAG master firmware (IDCODE read) tested against a behavioural TAP model
+- 2-flop input synchronisers on all protocol inputs
 - Timestamped edge-capture engine
 - 16-entry autonomous pattern sequencer
 - Cycle-accurate reference model and constrained-random differential tests
@@ -27,7 +29,7 @@ after fabrication through a dedicated SPI host port.
 The original push-pull I2C waveform demo is retained for comparison; the
 open-drain implementation uses output-enable control and supports slave clock
 stretching. Multi-master arbitration and the stretch protocols (USB, Ethernet,
-CAN, JTAG, SWD, and PS/2) remain future work.
+CAN, SWD, and PS/2) remain future work.
 
 ## Pin map
 
@@ -53,7 +55,8 @@ make cocotb       # simulate the generated RTL with IHP SRAM models
 make area         # generic Yosys logic-cell estimate, SRAMs black-boxed
 ```
 
-See [the project datasheet](docs/info.md) for the architecture and host command
+See [the verification approach](docs/verification.md), [AI tool usage](docs/ai-usage.md),
+[the project datasheet](docs/info.md) for the architecture and host command
 interface, and [the synthesis notes](docs/synthesis.md) for physical-design
 status and earlier area results.
 

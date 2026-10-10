@@ -83,3 +83,9 @@
  (modules test_debug)
  (libraries protocore hardcaml test_util)
  (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_jtag)
+ (modules test_jtag)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))

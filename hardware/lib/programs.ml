@@ -317,3 +317,62 @@ let arithmetic_program () : int array =
     ]
   in
   assemble ~program_size:256 lines
+
+(* JTAG master: reset the TAP, walk to Shift-DR and read the 32-bit IDCODE
+   (default DR after Test-Logic-Reset) into data memory [out_addr..+3],
+   least-significant byte first, then return the TAP to Run-Test/Idle.
+   Pins: TCK = 0, TMS = 1, TDI = 2 (held 0), TDO = 3 (input).
+   [half] is the TCK half-period in core cycles. TDO is sampled while TCK is
+   high, which is after the TAP has updated TDO on the previous falling edge. *)
+let jtag_idcode_program ~(out_addr : int) ~(half : int) : int array =
+  let tck = 0x01 in
+  let tms_bit = 0x02 in
+  let sample_n = ref 0 in
+  (* One TCK cycle with the given TMS value; optionally sample TDO into the
+     MSB of SHIFT (after shifting right), i.e. an LSB-first accumulator. *)
+  let clock ~tms ~sample =
+    let low = if tms = 1 then tms_bit else 0 in
+    let sample_lines =
+      if not sample then []
+      else begin
+        Int.incr sample_n;
+        let skip = Printf.sprintf "tdo_skip_%d" !sample_n in
+        [ i (Shr (SHIFT, 1)); i (Jnb (3, Label skip)); i (Ori (SHIFT, 0x80)) ]
+        @ [ label skip Nop ]
+      end
+    in
+    [ i (Setpins (low lor tck)) ]
+    @ delay half
+    @ sample_lines
+    @ [ i (Setpins low) ]
+    @ delay half
+  in
+  let lines =
+    [ i (Ldi (OE, 0x07)); i (Setpins 0x00) ]
+    @ List.concat (List.init 5 ~f:(fun _ -> clock ~tms:1 ~sample:false)) (* reset *)
+    @ clock ~tms:0 ~sample:false (* Run-Test/Idle *)
+    @ clock ~tms:1 ~sample:false (* Select-DR *)
+    @ clock ~tms:0 ~sample:false (* Capture-DR *)
+    @ clock ~tms:0 ~sample:false (* Shift-DR *)
+    @ [ i (Ldi (Y, out_addr)); i (Ldi (A, 3)) ]
+    @ [ label "jb_byte" (Ldi (SHIFT, 0)); i (Ldi (X, 8)); label "jb_bit" Nop ]
+    @ clock ~tms:0 ~sample:true
+    @ [ i (Decjnz (Label "jb_bit"))
+      ; i (Sty SHIFT)
+      ; i (Addi (Y, 1))
+      ; i (Subi (A, 1))
+      ; i (Jnz (Label "jb_byte"))
+      ; (* last byte: 7 bits with TMS=0, then the final bit with TMS=1 *)
+        i (Ldi (SHIFT, 0))
+      ; i (Ldi (X, 7))
+      ; label "jb_last" Nop
+      ]
+    @ clock ~tms:0 ~sample:true
+    @ [ i (Decjnz (Label "jb_last")) ]
+    @ clock ~tms:1 ~sample:true (* Exit1-DR *)
+    @ [ i (Sty SHIFT) ]
+    @ clock ~tms:1 ~sample:false (* Update-DR *)
+    @ clock ~tms:0 ~sample:false (* Run-Test/Idle *)
+    @ [ label "jb_done" (Jmp (Label "jb_done")) ]
+  in
+  assemble ~program_size:256 lines
