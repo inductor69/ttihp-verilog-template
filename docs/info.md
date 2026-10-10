@@ -29,6 +29,8 @@ OCaml/Hardcaml (`hardware/`).
   Every instruction takes exactly one cycle except `DELAY` (imm+1),
   `WAITCYC`/`WAITPIN` (variable) and `PUSH`/`PULL` (stall on FIFO).
   The assembler exploits this to emit bit-exact timing.
+- Protocol inputs (uio_in) pass through a 2-flop synchroniser, so firmware sees
+  pin changes 2 cycles late. Capture timestamps compensate for this.
 - A free-running cycle counter and `WAITCYC` give absolute-time scheduling:
   programs can phase-lock waveforms instead of accumulating relative jitter.
 - 8 bidirectional protocol pins (uio[7:0]) with per-pin output-enable, plus a

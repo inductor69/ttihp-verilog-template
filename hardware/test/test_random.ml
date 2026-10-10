@@ -28,7 +28,7 @@ let random_program (rng : Random.State.t) : int array =
   Array.init 256 ~f:(fun _ -> insn ())
 
 let () =
-  let seeds = List.init 8 ~f:(fun i -> 0x5000 + i) in
+  let seeds = List.init 64 ~f:(fun i -> 0x5000 + i) in
   let total_cycles = ref 0 in
   List.iter seeds ~f:(fun seed ->
       let rng = Random.State.make [| seed |] in
@@ -40,11 +40,14 @@ let () =
       t.inputs.test_enable := Bits.of_int ~width:1 1;
       r.enabled <- true;
       let mismatches = ref 0 in
+      let sync1 = ref 0 and sync2 = ref 0 in
       for i = 0 to n_cycles - 1 do
-        let pins_in = (i * 5) land 0xff in
+        let pins_in = Random.State.int rng 0x100 in
         t.inputs.pins_in := Bits.of_int ~width:8 pins_in;
         Cyclesim.cycle t.sim;
-        Ref_model.step r ~pins_in;
+        Ref_model.step r ~pins_in:!sync2;
+        sync2 := !sync1;
+        sync1 := pins_in;
         let pc_s = Bits.to_int !(t.outputs.pc) in
         let regs_s = Bits.to_int !(t.outputs.regs) in
         let pins_s = Bits.to_int !(t.outputs.pins_out) in

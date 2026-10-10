@@ -64,13 +64,19 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
   let cap_wr_addr = w "cap_wr_addr" 8 in
   let cap_wr_data = w "cap_wr_data" 8 in
 
+  (* Two-flop synchroniser for the asynchronous protocol inputs: external
+     pins must never reach core or capture logic directly (metastability).
+     Costs two cycles of input latency, mirrored in the reference model. *)
+  let sync_spec = Reg_spec.create ~clock:i.clock () in
+  let pins_sync = reg sync_spec (reg sync_spec i.pins_in) -- "pins_sync" in
+
   (* Core *)
   let core_out =
     Core.create ~sram
       { Core.I.clock = i.clock
       ; reset = i.reset |: host_reset_core
       ; enable = host_run |: i.test_enable
-      ; pins_in = i.pins_in
+      ; pins_in = pins_sync
       ; prog_wr = host_prog_wr
       ; prog_wr_addr = host_prog_wr_addr
       ; prog_wr_data = host_prog_wr_data
@@ -129,8 +135,8 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
       ; pin = select host_out.cap_ctrl 4 2
       ; any = bit host_out.cap_ctrl 5
       ; base = host_out.cap_base
-      ; pins_in = i.pins_in
-      ; cyc = core_out.cyc_out
+      ; pins_in = pins_sync
+      ; cyc = core_out.cyc_out -:. 2 (* undo synchroniser latency *)
       }
   in
   (* Pattern sequencer: streams {pins, duration} entries from data memory *)

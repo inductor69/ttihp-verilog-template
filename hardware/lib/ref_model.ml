@@ -81,7 +81,7 @@ let step t ~(pins_in : int) : unit =
     let alu_borrow = if rv < imm then 1 else 0 in
     let shift_count = if imm = 0 then 8 else imm in
     let alu_shl = if shift_count >= 8 then 0 else (rv lsl shift_count) land 0xff in
-    let alu_shr = rv lsr shift_count in
+    let alu_shr = if shift_count >= 8 then 0 else rv lsr shift_count in
     let alu_and = rv land imm in
     let alu_or = rv lor imm in
     let alu_xor = rv lxor imm in

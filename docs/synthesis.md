@@ -1,5 +1,20 @@
 # Synthesis and physical-design results
 
+## Latest run: `e2e-sync-20261010` (with input synchroniser)
+
+Re-hardened after adding the 2-flop `uio_in` synchroniser and the halted-`LD`
+readback fix. Same config, 20 ns clock, 6x4 tiles:
+
+- Detailed-routing DRC 0, antenna 0, LVS 0 errors, 0 max-slew/cap violations,
+  0 power-grid violations
+- Setup/hold violations 0 in all corners; worst setup slack 6.51 ns (slow),
+  worst hold slack 0.039 ns (fast), 0.176 ns typical, 0.389 ns slow
+- Instance area 885,233 um^2 including macros; utilization 16.6%
+- KLayout/Magic DRC are disabled in `src/config.json` (see the DRC note below);
+  this run was not re-checked with the official KLayout deck.
+
+The sections below record the earlier `final-precheck-20260925` run.
+
 The SRAM-backed ProtoCore completes the IHP SG13G2 LibreLane flow in its 6x4
 Tiny Tapeout allocation. The recorded run is `final-precheck-20260925`, using
 a 20 ns clock constraint and the IHP program/data SRAM macros.

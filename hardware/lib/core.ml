@@ -133,7 +133,9 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
   let delay_done = dly.value ==: imm in
   let waitcyc_done = select cyc.value 7 0 ==: imm in
   let waitpin_done = pin_arg_bit ==: bit imm 0 in
-  let ld_active = op_is 0x1E |: op_is 0x0A in (* LD / LDY *)
+  (* LD / LDY.  Gated by [enable] so a halted core never steals the data
+     read port from the host (readback of memory while stopped on a load). *)
+  let ld_active = (op_is 0x1E |: op_is 0x0A) &: i.enable in
   let advance =
     mux2 (op_is 0x0D) delay_done
       (mux2 (op_is 0x0E) waitcyc_done
