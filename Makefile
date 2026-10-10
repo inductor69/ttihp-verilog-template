@@ -9,7 +9,7 @@
 
 VENV ?= .venv
 
-.PHONY: rtl sim formal cocotb cocotb-setup all clean
+.PHONY: rtl sim formal cocotb cocotb-icarus cocotb-setup all clean
 
 # Regenerate src/project.v from the Hardcaml source
 rtl:
@@ -37,6 +37,11 @@ cocotb-setup:
 # Run the Tiny Tapeout cocotb testbench on the emitted Verilog (Verilator)
 cocotb:
 	cd test && PATH="$(CURDIR)/$(VENV)/bin:$$PATH" make -B SIM=verilator
+
+# Same testbench under Icarus (4-state, as in CI); catches X-propagation that
+# Verilator's 2-state simulation hides
+cocotb-icarus:
+	cd test && PATH="$(CURDIR)/$(VENV)/bin:$$PATH" make -B SIM=icarus
 
 all: rtl sim
 

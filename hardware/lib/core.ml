@@ -85,7 +85,14 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
   in
   let instr_src = if sram then sram_dout else ir.value in
   (* Decode from the instruction source (program SRAM read is synchronous). *)
-  let op = select instr_src 15 11 -- "op" in
+  (* SRAM build: the macro output is the instruction register and is
+     undefined until first read.  [valid] forces a NOP until the core has run
+     one enabled cycle, exactly like the flop build whose [ir] resets to 0, so
+     both builds execute identical cycle-by-cycle sequences and the fetch
+     address never depends on an unread (X) macro output. *)
+  let valid = Always.Variable.reg spec ~width:1 in
+  let op_raw = select instr_src 15 11 in
+  let op = (if sram then mux2 valid.value op_raw (zero 5) else op_raw) -- "op" in
   let arg = select instr_src 10 8 -- "arg" in
   let imm = select instr_src 7 0 -- "imm" in
   let op_is k = op ==:. k in
@@ -150,7 +157,7 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
       (* The macro output itself is the instruction register.  Disable its
          read port while a variable-latency instruction stalls so the current
          opcode cannot be replaced by the following instruction. *)
-      Signal.assign prog_ren_w ((~:(i.prog_wr)) &: (advance |: ~:(i.enable)))
+      Signal.assign prog_ren_w ((~:(i.prog_wr)) &: i.enable &: advance)
   in
   let ir_next = if sram then sram_dout else mux2 advance prog_mem ir.value in
   (* Register file read muxes *)
@@ -270,7 +277,8 @@ let create ?(sram = false) (i : Signal.t I.t) : Signal.t O.t =
   compile
     [ data_read <-- data_read_next (* synchronous memory read port, always active *)
     ; when_ i.enable
-        [ cyc <-- cyc.value +:. 1
+        [ valid <-- vdd
+        ; cyc <-- cyc.value +:. 1
         ; dly <-- dly_next
         ; ir <-- ir_next (* fetch: hold on stall *)
         ; ld_addr <-- mux2 (ld_active &: ~:(ld_stall.value)) ld_addr_next ld_addr.value
