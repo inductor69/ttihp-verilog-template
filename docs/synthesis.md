@@ -1,19 +1,28 @@
 # Synthesis and physical-design results
 
-## Latest run: `e2e-sync-20261010` (with input synchroniser)
+## Latest run: Tiny Tapeout CI, commit `7f6a6e7`
 
-Re-hardened after adding the 2-flop `uio_in` synchroniser and the halted-`LD`
-readback fix. Same config, 20 ns clock, 6x4 tiles:
+Official `tt-gds-action@ttihp26b` flow on the final RTL (input synchroniser,
+X-safe SRAM fetch), 20 ns clock, 6x4 tiles:
 
+- GDS, precheck and gate-level test all pass. The precheck covers KLayout
+  SG13G2 DRC, zero-area, pin-label, pin, boundary, layer, cell-name, analog-pin
+  and Verilog-syntax checks.
 - Detailed-routing DRC 0, antenna 0, LVS 0 errors, 0 max-slew/cap violations,
   0 power-grid violations
-- Setup/hold violations 0 in all corners; worst setup slack 6.51 ns (slow),
-  worst hold slack 0.039 ns (fast), 0.176 ns typical, 0.389 ns slow
-- Instance area 885,233 um^2 including macros; utilization 16.6%
-- KLayout/Magic DRC are disabled in `src/config.json` (see the DRC note below);
-  this run was not re-checked with the official KLayout deck.
+- Setup/hold violations 0 in all corners:
 
-The sections below record the earlier `final-precheck-20260925` run.
+| Corner | Worst setup slack | Worst hold slack |
+|---|---:|---:|
+| fast 1.32 V / -40 C | 11.534 ns | 0.088 ns |
+| typical 1.20 V / 25 C | 11.239 ns | 0.283 ns |
+| slow 1.08 V / 125 C | 5.890 ns | 0.566 ns |
+
+- Instance area 885,233 um^2 including SRAM macros; utilization 16.6%
+- The gate-level test runs the same cocotb UART test on the post-layout netlist
+  with the IHP SRAM behavioural models.
+
+The sections below record the earlier `final-precheck-20260925` run (before the\ninput synchroniser).
 
 The SRAM-backed ProtoCore completes the IHP SG13G2 LibreLane flow in its 6x4
 Tiny Tapeout allocation. The recorded run is `final-precheck-20260925`, using

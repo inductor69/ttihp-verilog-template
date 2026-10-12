@@ -19,6 +19,8 @@ after fabrication through a dedicated SPI host port.
 - SPI mode-0 transmit-only and full-duplex master firmware
 - Open-drain I2C master firmware with ACK sampling and clock-stretch support
 - JTAG master firmware (IDCODE read) tested against a behavioural TAP model
+- SWD master firmware (line reset, JTAG-to-SWD switch, DPIDR read with bus
+  turnaround and parity) tested against a behavioural SW-DP model
 - 2-flop input synchronisers on all protocol inputs
 - Timestamped edge-capture engine
 - 16-entry autonomous pattern sequencer
@@ -29,7 +31,7 @@ after fabrication through a dedicated SPI host port.
 The original push-pull I2C waveform demo is retained for comparison; the
 open-drain implementation uses output-enable control and supports slave clock
 stretching. Multi-master arbitration and the stretch protocols (USB, Ethernet,
-CAN, SWD, and PS/2) remain future work.
+CAN, and PS/2) remain future work.
 
 ## Pin map
 

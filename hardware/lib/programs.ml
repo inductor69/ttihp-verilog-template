@@ -376,3 +376,63 @@ let jtag_idcode_program ~(out_addr : int) ~(half : int) : int array =
     @ [ label "jb_done" (Jmp (Label "jb_done")) ]
   in
   assemble ~program_size:256 lines
+
+(* SWD master: line reset, JTAG-to-SWD switch (0xE79E), line reset, then a DP
+   read of DPIDR (request 0xA5). Stores the 32-bit DPIDR LSB first at
+   [out_addr..+3], the 3-bit ACK at [out_addr+4] (1 = OK) and the received
+   parity bit at [out_addr+5].  SWCLK = pin 0 (output), SWDIO = pin 1
+   (bidirectional: OE released for the turnaround and the target's reply).
+   The target updates SWDIO after SWCLK rises and the master samples it just
+   before SWCLK falls; the host changes SWDIO while SWCLK is low.  Bytes are
+   pre-reversed because OUTS shifts the MSB out first. *)
+let swd_dpidr_program ~(out_addr : int) ~(half : int) : int array =
+  let clk = 0 and dio = 1 in
+  let n = ref 0 in
+  let pulse ~sample =
+    let sample_lines =
+      if not sample then []
+      else begin
+        Int.incr n;
+        let skip = Printf.sprintf "swd_skip_%d" !n in
+        [ i (Shr (SHIFT, 1)); i (Jnb (dio, Label skip)); i (Ori (SHIFT, 0x80))
+        ; label skip Nop ]
+      end
+    in
+    [ i (Setpin (clk, 1)) ] @ delay half @ sample_lines @ [ i (Setpin (clk, 0)) ] @ delay half
+  in
+  let loop name ~count body =
+    [ i (Ldi (X, count)); label name Nop ] @ body @ [ i (Decjnz (Label name)) ]
+  in
+  let send_byte name rev =
+    [ i (Ldi (SHIFT, rev)) ] @ loop name ~count:8 ([ i (Outs dio) ] @ pulse ~sample:false)
+  in
+  let line_reset name =
+    [ i (Setpin (dio, 1)) ] @ loop name ~count:56 (pulse ~sample:false)
+  in
+  let lines =
+    [ i (Ldi (OE, 0x03)); i (Setpins 0x02) ]
+    @ line_reset "swd_r1"
+    @ send_byte "swd_sw0" 0x79 (* 0x9E, reversed *)
+    @ send_byte "swd_sw1" 0xE7 (* 0xE7, reversed *)
+    @ line_reset "swd_r2"
+    @ [ i (Setpin (dio, 0)) ]
+    @ loop "swd_idle0" ~count:2 (pulse ~sample:false)
+    @ send_byte "swd_req" 0xA5 (* start,AP=0,RnW=1,A=00,parity=1,stop,park *)
+    @ [ i (Setoe 0x01) ]
+    @ pulse ~sample:false (* turnaround *)
+    @ [ i (Ldi (SHIFT, 0)) ]
+    @ loop "swd_ack" ~count:3 (pulse ~sample:true)
+    @ [ i (Shr (SHIFT, 5)); i (St (SHIFT, out_addr + 4)) ]
+    @ [ i (Ldi (Y, out_addr)); i (Ldi (A, 4)) ]
+    @ [ label "swd_byte" (Ldi (SHIFT, 0)) ]
+    @ loop "swd_bit" ~count:8 (pulse ~sample:true)
+    @ [ i (Sty SHIFT); i (Addi (Y, 1)); i (Subi (A, 1)); i (Jnz (Label "swd_byte")) ]
+    @ [ i (Ldi (SHIFT, 0)) ]
+    @ pulse ~sample:true (* parity *)
+    @ [ i (Shr (SHIFT, 7)); i (St (SHIFT, out_addr + 5)) ]
+    @ pulse ~sample:false (* turnaround back to host *)
+    @ [ i (Setoe 0x03); i (Setpin (dio, 0)) ]
+    @ loop "swd_idle1" ~count:8 (pulse ~sample:false)
+    @ [ label "swd_done" (Jmp (Label "swd_done")) ]
+  in
+  assemble ~program_size:256 lines
