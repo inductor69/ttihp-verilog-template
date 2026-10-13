@@ -436,3 +436,116 @@ let swd_dpidr_program ~(out_addr : int) ~(half : int) : int array =
     @ [ label "swd_done" (Jmp (Label "swd_done")) ]
   in
   assemble ~program_size:256 lines
+
+(* Low-speed USB token transmitter (SETUP / IN / OUT).  D+ = pin 0, D- = pin 1.
+
+   Inputs in data memory: [0] = PID nibble (e.g. SETUP 0xD, OUT 0x1, IN 0x9),
+   [1] = device address (7 bits), [2] = endpoint (4 bits).
+
+   Phase 1 (untimed) builds the packet on-chip: the PID byte with its inverted
+   check nibble, the address/endpoint fields, and the 5-bit CRC (x^5+x^2+1,
+   seed 0x1F, result inverted and bit-reversed for LSB-first transmission).
+   The four stream bytes (SYNC, PID, ADDR+ENDP[0], ENDP[3:1]+CRC5) are stored at
+   0x10..0x13.
+
+   Phase 2 (timed) serialises them with NRZI encoding and bit stuffing, one bit
+   every [bit_cycles] = 33 core cycles (1.515 Mbit/s at 50 MHz, +1.0 % vs the
+   1.5 Mbit/s low-speed rate), then drives SE0 SE0 J as EOP and releases the
+   bus.  Every path through the per-bit slot is padded to exactly 33 cycles
+   and the line toggles at the same cycle offset in every slot, so the bit
+   edges have no jitter.  Registers in phase 2: A = stuff pending, X = ones
+   remaining before a stuff, Y = stream pointer, TMP = bits left in byte,
+   SHIFT = current byte. *)
+let usb_ls_token_program () : int array =
+  let bit_cycles = 33 and toggle_at = 20 in
+  let stream = 0x10 in
+  let stream_end = stream + 4 in
+  let pad ~from ~upto = if upto > from then delay_cycles (upto - from) |> List.map ~f:i else [] in
+  let uniq = ref 0 in
+  let fresh s = Int.incr uniq; Printf.sprintf "%s_%d" s !uniq in
+  (* dst += src (src preserved, X used as counter) *)
+  let add_reg ~dst ~src =
+    let l = fresh "add" and d = fresh "add_done" in
+    [ i (Mov (X, src)); i (Addi (X, 0)); i (Jz (Label d)); label l (Addi (dst, 1))
+    ; i (Decjnz (Label l)); label d Nop ]
+  in
+  (* one CRC5 pass over [count] bits of the byte at [src] (LSB first), crc in Y *)
+  let crc_bits ~src ~count =
+    let l = fresh "crc" and b1 = fresh "crc1" and cont = fresh "crcc" and nf = fresh "crcn" in
+    [ i (Ld (SHIFT, src)); i (Ldi (X, count))
+    ; label l (Shr (SHIFT, 1)); i (Jc (Label b1))
+    ; i (Mov (A, Y)); i (Shr (A, 4)); i (Jmp (Label cont))
+    ; label b1 (Mov (A, Y)); i (Shr (A, 4)); i (Xori (A, 1))
+    ; label cont (Shl (Y, 1)); i (Andi (Y, 0x1f)); i (Addi (A, 0)); i (Jz (Label nf))
+    ; i (Xori (Y, 0x05))
+    ; label nf (Decjnz (Label l)) ]
+  in
+  let prepass =
+    [ (* PID byte = (~pid << 4) | pid *)
+      i (Ld (A, 0)); i (Andi (A, 0x0f)); i (St (A, 0x20))
+    ; i (Mov (SHIFT, A)); i (Xori (SHIFT, 0x0f)); i (Shl (SHIFT, 4)) ]
+    @ add_reg ~dst:SHIFT ~src:A
+    @ [ i (St (SHIFT, stream + 1))
+      ; i (Ld (A, 1)); i (Andi (A, 0x7f)); i (St (A, 0x21))
+      ; i (Ld (TMP, 2)); i (Andi (TMP, 0x0f)); i (St (TMP, 0x22))
+      ; i (Mov (SHIFT, TMP)); i (Andi (SHIFT, 1)); i (Shl (SHIFT, 7)) ]
+    @ add_reg ~dst:SHIFT ~src:A
+    @ [ i (St (SHIFT, stream + 2)); i (Ldi (Y, 0x1f)) ]
+    @ crc_bits ~src:0x21 ~count:7
+    @ crc_bits ~src:0x22 ~count:4
+    @ [ (* invert, then bit-reverse the 5 CRC bits for LSB-first transmission *)
+        i (Xori (Y, 0x1f)); i (Ldi (A, 0)); i (Ldi (X, 5))
+      ; label "u_rev" (Shl (A, 1)); i (Shr (Y, 1)); i (Jnc (Label "u_rev_n"))
+      ; i (Addi (A, 1)); label "u_rev_n" (Decjnz (Label "u_rev"))
+      ; i (Shl (A, 3)); i (Ld (SHIFT, 0x22)); i (Shr (SHIFT, 1)) ]
+    @ add_reg ~dst:A ~src:SHIFT
+    @ [ i (St (A, stream + 3)); i (Ldi (A, 0x80)); i (St (A, stream)) ]
+  in
+  let start =
+    [ i (Ldi (OE, 0x03)); i (Setpins 0x02) (* J idle *)
+    ; i (Ldi (A, 0)); i (Ldi (X, 6)); i (Ldi (Y, stream)); i (Ldi (TMP, 0)) ]
+  in
+  let toggle = [ i (Xori (PINS, 0x03)) ] in
+  let slot =
+    [ label "u_slot" (Addi (A, 0)) (* c0 *)
+    ; i (Jnz (Label "u_stuff")) (* c1 *)
+    ; i (Addi (TMP, 0)) (* c2 *)
+    ; i (Jnz (Label "u_nor")) (* c3 *)
+    ; (* reload arm: c4..c11 *)
+      i (Subi (Y, stream_end)); i (Jz (Label "u_exit")); i (Addi (Y, stream_end))
+    ; i (Ldy SHIFT); i (Addi (Y, 1)); i (Ldi (TMP, 8)); i (Jmp (Label "u_j")) ]
+    @ [ label "u_nor" Nop ] (* c4 *)
+    @ pad ~from:5 ~upto:12
+    @ [ label "u_j" (Shr (SHIFT, 1)) (* c12 *)
+      ; i (Jc (Label "u_one")) (* c13 *)
+      ; i (Ldi (X, 6)); i (Subi (TMP, 1)) ] (* zero bit: c14, c15 *)
+    @ pad ~from:16 ~upto:toggle_at
+    @ toggle (* c20 *)
+    @ pad ~from:(toggle_at + 1) ~upto:(bit_cycles - 1)
+    @ [ i (Jmp (Label "u_slot")) ]
+    @ [ label "u_one" (Subi (TMP, 1)) (* c14 *)
+      ; i (Subi (X, 1)) (* c15: Z when six ones have been sent *)
+      ; i (Jnz (Label "u_one_skip")) (* c16 *)
+      ; i (Ldi (A, 1)) ] (* c17: stuff pending *)
+    @ pad ~from:18 ~upto:(bit_cycles - 1)
+    @ [ i (Jmp (Label "u_slot")) ]
+    @ [ label "u_one_skip" Nop ] (* c17 *)
+    @ pad ~from:18 ~upto:(bit_cycles - 1)
+    @ [ i (Jmp (Label "u_slot")) ]
+    @ [ label "u_stuff" (Ldi (A, 0)); i (Ldi (X, 6)) ] (* c2, c3 *)
+    @ pad ~from:4 ~upto:toggle_at
+    @ toggle
+    @ pad ~from:(toggle_at + 1) ~upto:(bit_cycles - 1)
+    @ [ i (Jmp (Label "u_slot")) ]
+  in
+  let eop =
+    (* entered at c6; align to the bit-edge offset, then SE0 for 2 bit times,
+       J for 1 bit time, then release the bus *)
+    [ label "u_exit" Nop ] @ pad ~from:7 ~upto:toggle_at
+    @ [ i (Setpins 0x00) ]
+    @ pad ~from:1 ~upto:(2 * bit_cycles)
+    @ [ i (Setpins 0x02) ]
+    @ pad ~from:1 ~upto:bit_cycles
+    @ [ i (Setoe 0x00); label "u_done" (Jmp (Label "u_done")) ]
+  in
+  assemble ~program_size:256 (prepass @ start @ slot @ eop)

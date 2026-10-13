@@ -95,3 +95,9 @@
  (modules test_swd)
  (libraries protocore hardcaml test_util)
  (preprocess (pps ppx_sexp_conv ppx_hardcaml)))
+
+(test
+ (name test_usb)
+ (modules test_usb)
+ (libraries protocore hardcaml test_util)
+ (preprocess (pps ppx_sexp_conv ppx_hardcaml)))

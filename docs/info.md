@@ -82,3 +82,16 @@ SymbiYosys/Z3 FIFO safety and cover properties.
 
 A USB-UART adapter connected to `uio[0]`, plus a host MCU or USB adapter to
 bit-bang the SPI programming interface.
+
+## Low-speed USB token transmitter
+
+`Programs.usb_ls_token_program` turns the core into a USB low-speed token
+sender on uio[0] (D+) and uio[1] (D-). The host loads the PID nibble, address and
+endpoint into data memory; the firmware builds the PID check nibble and CRC5
+itself, then serialises the packet with NRZI and bit stuffing at 33 core cycles
+per bit (1.515 Mbit/s from 50 MHz, +1 %, inside the 1.5 % low-speed tolerance)
+and ends with SE0 SE0 J. Every path in the per-bit slot is padded to the same
+length and the line toggles at the same cycle offset, so edges have no jitter.
+Receive, data packets and clock recovery are not implemented; the 3.3 V
+pads drive the bus through series resistors; a host-side Pmod also needs 15 kohm
+pull-downs on D+ and D-.
